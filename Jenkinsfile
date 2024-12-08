@@ -48,7 +48,7 @@ pipeline {
             steps {
                 sshagent(['docker-server']) {
                     sh '''
-                    ssh root@54.174.169.61 "curl -I http://54.174.169.61:8081"
+                    ssh root@54.174.169.61 "curl -I http://54.174.169.61:8080"
                     '''
                 }
             }
