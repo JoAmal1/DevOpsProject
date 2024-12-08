@@ -38,7 +38,7 @@ pipeline {
             steps {
                 sshagent(['docker-server']) {
                     sh '''
-                    ssh root@54.174.169.61 "docker stop flask-app-container || true && docker rm flask-app-container || true && docker run --name flask-app-container -d -p 8081:80 flask-app:develop-${BUILD_ID}"
+                    ssh root@54.174.169.61 "docker stop flask-app-container || true && docker rm flask-app-container || true && docker run --name flask-app-container -d -p 8080:8080 flask-app:develop-${BUILD_ID}"
                     '''
                 }
             }
