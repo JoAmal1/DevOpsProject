@@ -1,72 +1,89 @@
-pipeline {
+kpipeline {
     agent any
-    stages {
-        stage('Cleanup') {
-            steps {
-                cleanWs()
-            }
-        }
 
+    environment {
+        // Git Repository
+        REPO_NAME = 'Chvald27/DevOpsProject'
+        BRANCH_NAME = 'develop'
+
+        // Docker Image Details
+        IMAGE_NAME = 'webapp'
+        IMAGE_TAG = 'latest'
+
+        // Kubernetes Config File (stored as Jenkins credential)
+        KUBE_CONFIG = credentials('kube-config') // Ensure kube-config is added in Jenkins credentials
+    }
+
+    stages {
         stage('Checkout Code') {
             steps {
-                checkout scm 
+                // Clone the Git repository
+                checkout scm
             }
         }
 
-        stage('Copy Files to Remote Server') {
+	stage('Access Docker VM') {
             steps {
-                sshagent(['docker-server']) {
+                sshagent(['Docker_VM']) {
                     sh '''
-		    scp -r * root@52.201.233.38:/opt/DevOpsProject/
-
+                    ssh -o StrictHostKeyChecking=no ubuntu@15.223.184.199 'docker --version'
                     '''
                 }
             }
         }
 
-        stage('Build Image') {
+        stage('Build and Test') {
             steps {
-                sshagent(['docker-server']) {
+                // Setup Python environment and run tests
+                sh '''
+                python3 -m venv venv
+                source venv/bin/activate
+                pip install -r requirements.txt
+                python -m unittest discover -s app/tests
+                '''
+            }
+        }
+
+        stage('Docker Build') {
+            steps {
+                // Build Docker image
+                sh '''
+                docker build -t $IMAGE_NAME:$IMAGE_TAG .
+                '''
+            }
+        }
+
+        stage('Docker Push') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'docker-hub-credentials', usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
+                    // Login to DockerHub and push image
                     sh '''
-                    ssh root@52.201.233.38 "cd /opt/DevOpsProject && docker build -t flask-app:develop-${BUILD_ID} ."
+                    docker login -u $DOCKER_USERNAME -p $DOCKER_PASSWORD
+                    docker tag $IMAGE_NAME:$IMAGE_TAG $DOCKER_USERNAME/$IMAGE_NAME:$IMAGE_TAG
+                    docker push $DOCKER_USERNAME/$IMAGE_NAME:$IMAGE_TAG
                     '''
                 }
             }
         }
 
-        stage('Run Container') {
-            steps {
-                sshagent(['docker-server']) {
-                    sh '''
-                    ssh root@52.201.233.38 "docker stop flask-app-container || true && docker rm flask-app-container || true && docker run --name flask-app-container -d -p 8080:8080 flask-app:develop-${BUILD_ID}"
-                    '''
-                }
-            }
-        }
+	stage('Deploy to EKS') {
+    	    steps {
+        	sh '''
+        	export KUBECONFIG=~/.kube/config
+        	kubectl apply -f k8s/deployment.yaml
+        	kubectl apply -f k8s/service.yaml
+        	'''
+    		}
+  	}    
+      }
 
-        stage('Test Website') {
-            steps {
-                sshagent(['docker-server']) {
-                    sh '''
-                    ssh root@52.201.233.38 "curl -I http://52.201.233.38:8080"
-                    '''
-                }
-            }
+    post {
+        always {
+            echo "Pipeline completed."
         }
-
-        stage('Push Image') {
-            steps {
-                sshagent(['docker-server']) {
-                    withCredentials([usernamePassword(credentialsId: 'dockerhub-auth', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
-                        sh '''
-                        ssh root@52.201.233.38 "docker tag flask-app:develop-${BUILD_ID} $USERNAME/flask-app:latest"
-                        ssh root@52.201.233.38 "docker tag flask-app:develop-${BUILD_ID} $USERNAME/flask-app:develop-${BUILD_ID}"
-                        ssh root@52.201.233.38 "docker push $USERNAME/flask-app:latest"
-                        ssh root@52.201.233.38 "docker push $USERNAME/flask-app:develop-${BUILD_ID}"
-                        '''
-                    }
-                }
-            }
+        failure {
+            echo "Pipeline failed!"
         }
     }
 }
+
